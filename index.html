@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gestion Camions — Événement</title>
+<link rel="stylesheet" href="style.css">
+<!-- SDK Firebase (compat v10 — pas de npm nécessaire) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<div class="app-wrap">
+  <div class="header-bar">
+    <h1>Gestion camions <span id="event-subtitle">— Événement</span></h1>
+    <button class="btn icon-btn" id="dark-toggle-btn" onclick="toggleDarkMode()" title="Mode nuit">🌙</button>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" onclick="showView('list')">Tableau de bord</button>
+    <button class="tab" onclick="showView('register')">Enregistrer</button>
+    <button class="tab" onclick="showView('map')">Plan</button>
+    <button class="tab" onclick="showView('import')">Importer</button>
+    <button class="tab" onclick="showView('log')">Historique</button>
+    <button class="tab" onclick="showView('bigscreen')">Grand écran</button>
+  </div>
+
+  <!-- TABLEAU DE BORD -->
+  <div id="view-list" class="view active">
+    <div class="settings-row">
+      <label>Nombre de places :</label>
+      <input type="number" id="capacity-input" value="82" min="1" max="999">
+      <button class="btn" onclick="updateCapacity()">Appliquer</button>
+      <span id="capacity-hint" style="font-size:12px"></span>
+    </div>
+    <div class="stats-grid">
+      <div class="stat">
+        <div class="stat-label">Places totales</div>
+        <div class="stat-value v-blue" id="stat-total">82</div>
+        <div class="capacity-bar"><div class="capacity-fill" id="capacity-bar" style="width:0%"></div></div>
+      </div>
+      <div class="stat"><div class="stat-label">Occupées</div><div class="stat-value v-green" id="stat-arrived">0</div></div>
+      <div class="stat"><div class="stat-label">Places libres</div><div class="stat-value" id="stat-free">82</div></div>
+      <div class="stat"><div class="stat-label">Repartis</div><div class="stat-value v-gray" id="stat-left">0</div></div>
+    </div>
+    <div class="stats-grid-2">
+      <div class="group-card">
+        <div class="group-icon icon-known">C</div>
+        <div class="group-body">
+          <div class="group-title">Camions connus — <strong id="g-known-total">0</strong> total</div>
+          <div class="group-nums"><span class="group-total v-teal" id="g-known-remaining">0</span><span class="group-detail">restants à traiter</span></div>
+          <div class="group-pills">
+            <span class="gpill gp-arrived" id="g-known-arrived">0 arrivés</span>
+            <span class="gpill gp-waiting" id="g-known-waiting">0 en attente</span>
+            <span class="gpill gp-left"    id="g-known-left">0 repartis</span>
+          </div>
+        </div>
+      </div>
+      <div class="group-card">
+        <div class="group-icon icon-unknown">?</div>
+        <div class="group-body">
+          <div class="group-title">Sans info — <strong id="g-unknown-total">0</strong> total</div>
+          <div class="group-nums"><span class="group-total v-amber" id="g-unknown-remaining">0</span><span class="group-detail">restants à traiter</span></div>
+          <div class="group-pills">
+            <span class="gpill gp-arrived" id="g-unknown-arrived">0 arrivés</span>
+            <span class="gpill gp-waiting" id="g-unknown-waiting">0 en attente</span>
+            <span class="gpill gp-left"    id="g-unknown-left">0 repartis</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="toolbar">
+      <div class="search-wrap">
+        <input type="text" id="search" placeholder="Immatriculation, société..." oninput="onSearch()" autocomplete="off" onblur="hideDropdownDelay()">
+        <div class="dropdown" id="search-dropdown"></div>
+      </div>
+      <select id="filter-type" onchange="renderTable()">
+        <option value="">Tous types</option>
+        <option value="known">Connu</option>
+        <option value="unknown">Sans info</option>
+      </select>
+      <select id="filter-status" onchange="renderTable()">
+        <option value="">Tous statuts</option>
+        <option value="arrived">Arrivé</option>
+        <option value="waiting">En attente</option>
+        <option value="left">Reparti</option>
+      </select>
+      <select id="filter-format" onchange="renderTable()">
+        <option value="">Tous formats</option>
+        <option value="poids-lourd">Poids lourd</option>
+        <option value="semi">Semi-remorque</option>
+      </select>
+      <button class="btn" onclick="exportSnapshot()">⬇ Export</button>
+    </div>
+    <div id="late-alert" style="display:none;background:#FFF3CD;color:#856404;padding:8px 14px;border-radius:var(--radius-sm);margin-bottom:10px;font-size:13px;border:0.5px solid #FFE187;font-weight:500"></div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr>
+  <th class="th-sort" onclick="sortBy('plate')">Immat. <span class="sort-icon" data-col="plate"></span></th>
+  <th class="th-sort" onclick="sortBy('format')">Format <span class="sort-icon" data-col="format"></span></th>
+  <th class="th-sort" onclick="sortBy('type')">Type <span class="sort-icon" data-col="type"></span></th>
+  <th class="th-sort" onclick="sortBy('company')">Société <span class="sort-icon" data-col="company"></span></th>
+  <th class="th-sort" onclick="sortBy('content')">Contenu <span class="sort-icon" data-col="content"></span></th>
+  <th class="th-sort" style="white-space:nowrap" onclick="sortBy('eta')">Heure prévue <span class="sort-icon" data-col="eta"></span></th>
+  <th class="th-sort" style="white-space:nowrap" onclick="sortBy('place')">Place <span class="sort-icon" data-col="place"></span></th>
+  <th class="th-sort" style="white-space:nowrap;min-width:90px" onclick="sortBy('status')">Statut <span class="sort-icon" data-col="status"></span></th>
+  <th style="white-space:nowrap;text-align:right">Actions</th>
+</tr></thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </div>
+    <div class="table-count" id="table-count"></div>
+  </div>
+
+  <!-- ENREGISTRER -->
+  <div id="view-register" class="view">
+    <div class="form-section">
+      <h3>Informations obligatoires</h3>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Immatriculation *</label>
+          <input type="text" id="reg-plate" placeholder="ex: AB-123-CD" oninput="checkPlate()">
+          <div id="plate-warning" style="font-size:12px;color:var(--red);display:none;margin-top:2px">Immatriculation déjà enregistrée</div>
+        </div>
+        <div class="form-group">
+          <label>Format *</label>
+          <select id="reg-format">
+            <option value="">Sélectionner...</option>
+            <option value="poids-lourd">Poids lourd</option>
+            <option value="semi">Semi-remorque</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Type de camion *</label>
+          <div class="type-toggle">
+            <button class="type-btn active-known" id="type-btn-known" onclick="selectType('known')">Connu</button>
+            <button class="type-btn" id="type-btn-unknown" onclick="selectType('unknown')">Sans info</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label id="reg-place-label">Numéro de place (optionnel, 1–82)</label>
+          <input type="number" id="reg-place" placeholder="ex: 5" min="1" oninput="checkPlace()">
+          <div id="place-feedback" class="place-feedback"></div>
+        </div>
+      </div>
+    </div>
+    <div class="form-section">
+      <h3>Informations complémentaires (optionnel)</h3>
+      <div class="form-grid">
+        <div class="form-group"><label>Société</label><input type="text" id="reg-company" placeholder="Nom de la société"></div>
+        <div class="form-group"><label>Contenu / Marchandise</label><input type="text" id="reg-content" placeholder="ex: Matériel scène"></div>
+        <div class="form-group"><label>Date et heure d'arrivée prévue</label><input type="datetime-local" id="reg-time"></div>
+        <div class="form-group" style="grid-column:1/-1"><label>Notes</label><textarea id="reg-notes" placeholder="Informations particulières..."></textarea></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary" onclick="registerTruck()">Enregistrer</button>
+      <button class="btn" onclick="clearForm()">Effacer</button>
+    </div>
+    <div class="success-msg" id="success-msg"></div>
+  </div>
+
+  <!-- PLAN DES PLACES -->
+  <div id="view-map" class="view">
+    <div class="stats-grid">
+      <div class="stat"><div class="stat-label">Places libres</div><div class="stat-value v-gray" id="map-free">82</div></div>
+      <div class="stat"><div class="stat-label">Connus présents</div><div class="stat-value v-blue" id="map-known">0</div></div>
+      <div class="stat"><div class="stat-label">Sans info présents</div><div class="stat-value v-amber" id="map-unknown">0</div></div>
+      <div class="stat"><div class="stat-label">Repartis</div><div class="stat-value v-gray" id="map-left">0</div></div>
+    </div>
+    <div class="map-legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#D3D1C7"></div>Libre</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#185FA5"></div>Connu (arrivé)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#EF9F27"></div>Sans info (arrivé)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#888780"></div>Reparti</div>
+    </div>
+    <div style="overflow-x:auto"><div id="map-grid" class="map-sections"></div></div>
+  </div>
+
+  <!-- IMPORT EXCEL -->
+  <div id="view-import" class="view">
+    <div class="form-section">
+      <h3>Importer depuis un fichier Excel ou CSV</h3>
+      <div class="import-drop" id="import-drop"
+        onclick="document.getElementById('import-file').click()"
+        ondragover="event.preventDefault();this.classList.add('drag-over')"
+        ondragleave="this.classList.remove('drag-over')"
+        ondrop="event.preventDefault();this.classList.remove('drag-over');handleImportFile(event.dataTransfer.files[0])">
+        <input type="file" id="import-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleImportFile(this.files[0])">
+        <div style="font-size:36px;margin-bottom:8px">📂</div>
+        <div style="font-weight:500;font-size:14px;margin-bottom:4px">Glisser un fichier ici ou cliquer pour parcourir</div>
+        <div style="font-size:12px">.xlsx · .xls · .csv acceptés</div>
+      </div>
+      <div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap">
+        <button class="btn" onclick="downloadTemplate()">⬇ Télécharger le modèle</button>
+        <div>
+          <div style="font-size:12px;color:var(--text-secondary);margin-bottom:5px">Colonnes du fichier :</div>
+          <div class="import-cols">
+            <span class="import-col-tag required">Immatriculation ✱</span>
+            <span class="import-col-tag">Format</span>
+            <span class="import-col-tag">Type</span>
+            <span class="import-col-tag">Société</span>
+            <span class="import-col-tag">Contenu</span>
+            <span class="import-col-tag">Heure prévue</span>
+            <span class="import-col-tag">Notes</span>
+          </div>
+          <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">Format : poids-lourd / semi — Type : known / unknown</div>
+        </div>
+      </div>
+    </div>
+    <div id="import-preview" style="display:none">
+      <div class="form-section">
+        <h3>Aperçu de l'import</h3>
+        <div id="import-summary" style="margin-bottom:12px;font-size:13px"></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:8px 10px;background:var(--bg-tertiary);border-radius:var(--radius-sm)">
+          <input type="checkbox" id="import-clear" style="cursor:pointer;width:15px;height:15px">
+          <label for="import-clear" style="font-size:13px;cursor:pointer;color:var(--text-secondary)">Vider toutes les données existantes avant d'importer</label>
+        </div>
+        <div style="overflow-x:auto;margin-bottom:1rem">
+          <table>
+            <thead><tr><th>Immat.</th><th>Format</th><th>Type</th><th>Société</th><th>Contenu</th><th>Heure</th><th>Notes</th></tr></thead>
+            <tbody id="import-table-body"></tbody>
+          </table>
+          <div id="import-table-more" style="font-size:12px;color:var(--text-secondary);margin-top:6px"></div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" id="import-btn" onclick="doImport()">Importer</button>
+          <button class="btn" onclick="cancelImport()">Annuler</button>
+        </div>
+        <div id="import-success" class="success-msg"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- HISTORIQUE -->
+  <div id="view-log" class="view">
+    <div class="form-section">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3 style="margin-bottom:0">Historique des événements</h3>
+        <button class="btn" onclick="exportLog()">⬇ Exporter</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Date / Heure</th><th>Camion</th><th>Action</th><th>Place</th></tr></thead>
+          <tbody id="log-body"></tbody>
+        </table>
+      </div>
+      <div id="log-count" style="margin-top:8px;font-size:12px;color:var(--text-secondary)"></div>
+    </div>
+  </div>
+
+  <!-- GRAND ÉCRAN -->
+  <div id="view-bigscreen" class="view">
+    <div class="bs-header">
+      <div class="bs-title">Gestion camions — Événement</div>
+      <div class="bs-clock" id="bs-clock">--:--:--</div>
+    </div>
+    <div class="bs-stats">
+      <div class="bs-stat">
+        <div class="bs-stat-label">Places occupées</div>
+        <div class="bs-stat-value v-green" id="bs-arrived">0</div>
+        <div class="bs-stat-sub">sur <span id="bs-total">82</span></div>
+      </div>
+      <div class="bs-stat">
+        <div class="bs-stat-label">Places libres</div>
+        <div class="bs-stat-value" id="bs-free">82</div>
+      </div>
+      <div class="bs-stat">
+        <div class="bs-stat-label">En attente</div>
+        <div class="bs-stat-value v-amber" id="bs-waiting">0</div>
+      </div>
+      <div class="bs-stat">
+        <div class="bs-stat-label">Repartis</div>
+        <div class="bs-stat-value v-gray" id="bs-left">0</div>
+      </div>
+    </div>
+    <div class="bs-progress-wrap">
+      <div class="bs-progress-track"><div class="bs-progress-fill" id="bs-progress"></div></div>
+      <div class="bs-progress-label" id="bs-progress-label"></div>
+    </div>
+    <div class="bs-late-section" id="bs-late-section" style="display:none">
+      <div class="bs-late-title">⚠ Retardataires &mdash; <span id="bs-late-count">0</span> camion(s) en attente</div>
+      <div id="bs-late-list" class="bs-late-list"></div>
+    </div>
+  </div>
+
+</div><!-- /.app-wrap -->
+
+<!-- INFO OVERLAY -->
+<div class="overlay" id="info-overlay">
+  <div class="info-card">
+    <div class="info-card-header">
+      <div class="info-card-plate" id="ic-plate">—</div>
+      <button class="info-close" onclick="closeInfo()">×</button>
+    </div>
+    <div id="ic-rows"></div>
+    <div class="info-actions" id="ic-actions"></div>
+  </div>
+</div>
+
+<!-- EDIT MODAL -->
+<div class="map-modal-bg" id="edit-modal-bg">
+  <div class="map-modal" style="max-width:480px;width:95%">
+    <div class="map-modal-title" id="edit-modal-title">Modifier</div>
+    <input type="hidden" id="edit-id">
+    <div class="form-grid" style="margin-bottom:10px">
+      <div class="form-group">
+        <label>Immatriculation</label>
+        <input type="text" id="edit-plate" disabled style="opacity:0.5;cursor:not-allowed">
+      </div>
+      <div class="form-group">
+        <label>Format *</label>
+        <select id="edit-format">
+          <option value="poids-lourd">Poids lourd</option>
+          <option value="semi">Semi-remorque</option>
+        </select>
+      </div>
+      <div class="form-group" style="grid-column:1/-1">
+        <label>Type de camion</label>
+        <div class="type-toggle">
+          <button class="type-btn active-known" id="edit-btn-known" onclick="selectEditType('known')">Connu</button>
+          <button class="type-btn" id="edit-btn-unknown" onclick="selectEditType('unknown')">Sans info</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Société</label>
+        <input type="text" id="edit-company" placeholder="Nom de la société">
+      </div>
+      <div class="form-group">
+        <label>Contenu / Marchandise</label>
+        <input type="text" id="edit-content" placeholder="ex: Matériel scène">
+      </div>
+      <div class="form-group">
+        <label>Date et heure d'arrivée prévue</label>
+        <input type="datetime-local" id="edit-eta">
+      </div>
+      <div class="form-group" style="grid-column:1/-1">
+        <label>Notes</label>
+        <textarea id="edit-notes" placeholder="Informations particulières..."></textarea>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:0.5rem">
+      <button class="btn btn-primary" onclick="saveEdit()">Enregistrer</button>
+      <button class="btn" onclick="closeEditModal()">Annuler</button>
+    </div>
+    <div class="success-msg" id="edit-save-msg">✓ Modifications enregistrées</div>
+  </div>
+</div>
+
+<!-- DELETE MODAL -->
+<div class="map-modal-bg" id="delete-modal-bg">
+  <div class="map-modal">
+    <div class="map-modal-title" style="color:var(--red)">Supprimer le camion</div>
+    <p id="delete-modal-text" style="font-size:13px;color:var(--text-secondary);margin-bottom:1rem"></p>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-danger" id="delete-modal-confirm">Supprimer</button>
+      <button class="btn" onclick="closeDeleteModal()">Annuler</button>
+    </div>
+  </div>
+</div>
+
+<!-- MAP MODAL -->
+<div class="map-modal-bg" id="map-modal-bg">
+  <div class="map-modal">
+    <div class="map-modal-title" id="map-modal-title">Place #1</div>
+    <div id="map-modal-content"></div>
+    <div style="display:flex;gap:8px;margin-top:1rem">
+      <button class="btn btn-primary" id="map-modal-action"></button>
+      <button class="btn" onclick="closeMapModal()">Fermer</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
