@@ -34,8 +34,8 @@ const overdueElapsed = t => {
 
 /* ── Sync depuis Firebase ──────────────────────────────────────── */
 function syncFromSnapshot(data) {
-  totalPlaces = (data.config && data.config.totalPlaces) || 82;
-  truckId     = (data.config && data.config.nextId)      || 0;
+  totalPlaces = 82;
+  truckId     = (data.config && data.config.nextId) || 0;
   const obj   = data.trucks || {};
   trucks = Object.keys(obj).map(k => {
     const t = obj[k];
@@ -48,11 +48,8 @@ function syncFromSnapshot(data) {
       priority: t.priority || false
     };
   });
-  places = Array(totalPlaces).fill(null);
-  trucks.forEach(t => { if (t.place !== null) places[t.place] = t.id; });
-  document.getElementById('capacity-input').value = totalPlaces;
-  document.getElementById('reg-place-label').textContent = 'Numéro de place * (1–' + totalPlaces + ')';
-  document.getElementById('reg-place').max = totalPlaces;
+  places = Array(82).fill(null);
+  trucks.forEach(t => { if (t.place !== null && t.place < 82) places[t.place] = t.id; });
   renderTable(); renderMap(); updateStats();
   renderTimeline('bs-timeline-section', 'bs-timeline-chart', 'bs-tl-total');
   if (document.getElementById('view-bigscreen')?.classList.contains('active')) renderBigScreen();
@@ -179,7 +176,7 @@ function renderTable() {
     return now > new Date(t.eta);
   };
   let filtered = trucks.filter(t => {
-    const mQ = !q || (t.plate.toLowerCase().includes(q) || (t.company && t.company.toLowerCase().includes(q)));
+    const mQ = !q || (t.plate.toLowerCase().includes(q) || (t.company && t.company.toLowerCase().includes(q)) || (t.content && t.content.toLowerCase().includes(q)));
     return mQ && (!ft || t.type === ft) && (!fs || t.status === fs) && (!ff || t.format === ff);
   });
   if (sortCol) {
@@ -314,13 +311,13 @@ function onSearch() {
   if (q.length < 2) { dd.classList.remove('open'); return; }
   const qu      = q.toUpperCase();
   const matches = trucks.filter(t =>
-    t.plate.toUpperCase().includes(qu) || (t.company && t.company.toUpperCase().includes(qu))
+    t.plate.toUpperCase().includes(qu) || (t.company && t.company.toUpperCase().includes(qu)) || (t.content && t.content.toUpperCase().includes(qu))
   ).slice(0, 8);
   if (!matches.length) { dd.classList.remove('open'); return; }
   dd.innerHTML = matches.map(t =>
     `<div class="dd-item" onmousedown="openInfo(${t.id})">
       <span class="dd-plate">${highlight(t.plate, q)}</span>
-      <span class="dd-meta">${t.company || FORMAT_LABELS[t.format]}</span>
+      <span class="dd-meta">${t.content ? highlight(t.content, q) : (t.company || FORMAT_LABELS[t.format])}</span>
       <span class="dd-badge dd-${t.type === 'known' ? 'known' : 'unknown'}">${t.type === 'known' ? 'Connu' : 'Sans info'}</span>
       <span class="dd-badge dd-${t.status}">${STATUS_LABELS[t.status]}</span>
     </div>`

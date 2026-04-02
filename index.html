@@ -28,12 +28,7 @@
 
   <!-- TABLEAU DE BORD -->
   <div id="view-list" class="view active">
-    <div class="settings-row">
-      <label>Nombre de places :</label>
-      <input type="number" id="capacity-input" value="82" min="1" max="999">
-      <button class="btn" onclick="updateCapacity()">Appliquer</button>
-      <span id="capacity-hint" style="font-size:12px"></span>
-    </div>
+    <input type="hidden" id="capacity-input" value="82">
     <div style="display:none">
       <div id="sc-waiting"></div><div id="sc-waiting-known"></div><div id="sc-waiting-unknown"></div>
       <div id="sc-arrived"></div><div id="sc-arrived-known"></div><div id="sc-arrived-unknown"></div>
@@ -42,44 +37,46 @@
 
     <div class="stats-grid">
       <div class="stat">
-        <div class="stat-label">Places totales</div>
-        <div class="stat-value v-blue" id="stat-total">82</div>
+        <div class="stat-label">Places libres</div>
+        <div class="stat-value" id="stat-free">82</div>
         <div class="capacity-bar"><div class="capacity-fill" id="capacity-bar" style="width:0%"></div></div>
       </div>
       <div class="stat"><div class="stat-label">Occupées</div><div class="stat-value v-green" id="stat-arrived">0</div></div>
-      <div class="stat"><div class="stat-label">Places libres</div><div class="stat-value" id="stat-free">82</div></div>
       <div class="stat"><div class="stat-label">Repartis</div><div class="stat-value v-gray" id="stat-left">0</div></div>
+      <div id="stat-total" style="display:none">82</div>
+    </div>
+    <div style="display:none">
+      <span id="g-known-arrived"></span><span id="g-known-waiting"></span><span id="g-known-left"></span>
+      <span id="g-unknown-arrived"></span><span id="g-unknown-waiting"></span><span id="g-unknown-left"></span>
     </div>
     <div class="stats-grid-2">
       <div class="group-card">
-        <div class="group-icon icon-known">C</div>
+        <div class="group-icon icon-known">
+          <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="1" y="3" width="15" height="13" rx="1"/><path d="M16 8h4l3 5v3h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/>
+          </svg>
+        </div>
         <div class="group-body">
           <div class="group-title">Camions connus — <strong id="g-known-total">0</strong> total</div>
           <div class="group-nums"><span class="group-total v-teal" id="g-known-remaining">0</span><span class="group-detail">restants à traiter</span></div>
-          <div class="group-pills">
-            <span class="gpill gp-arrived" id="g-known-arrived">0 sur place</span>
-            <span class="gpill gp-waiting" id="g-known-waiting">0 à venir</span>
-            <span class="gpill gp-left"    id="g-known-left">0 repartis</span>
-          </div>
         </div>
       </div>
       <div class="group-card">
-        <div class="group-icon icon-unknown">?</div>
+        <div class="group-icon icon-unknown">
+          <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="1" y="3" width="15" height="13" rx="1"/><path d="M16 8h4l3 5v3h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/>
+          </svg>
+        </div>
         <div class="group-body">
           <div class="group-title">Sans info — <strong id="g-unknown-total">0</strong> total</div>
           <div class="group-nums"><span class="group-total v-amber" id="g-unknown-remaining">0</span><span class="group-detail">restants à traiter</span></div>
-          <div class="group-pills">
-            <span class="gpill gp-arrived" id="g-unknown-arrived">0 sur place</span>
-            <span class="gpill gp-waiting" id="g-unknown-waiting">0 à venir</span>
-            <span class="gpill gp-left"    id="g-unknown-left">0 repartis</span>
-          </div>
         </div>
       </div>
     </div>
 
     <div class="toolbar">
       <div class="search-wrap">
-        <input type="text" id="search" placeholder="Immatriculation, société..." oninput="onSearch()" autocomplete="off" onblur="hideDropdownDelay()">
+        <input type="text" id="search" placeholder="Immatriculation, société, contenu..." oninput="onSearch()" autocomplete="off" onblur="hideDropdownDelay()">
         <div class="dropdown" id="search-dropdown"></div>
       </div>
       <select id="filter-type" onchange="renderTable()">
