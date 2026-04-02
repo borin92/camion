@@ -1,25 +1,12 @@
 [build]
-  publish = "."
+  command = "npm run build"
+  publish = "dist"
 
 [[headers]]
   for = "/*"
   [headers.values]
-    # Empêche l'intégration dans une iframe (clickjacking)
     X-Frame-Options = "DENY"
-
-    # Empêche le sniffing MIME
     X-Content-Type-Options = "nosniff"
-
-    # Force HTTPS pour 1 an
     Strict-Transport-Security = "max-age=31536000; includeSubDomains"
-
-    # Réduit les infos de referrer
     Referrer-Policy = "strict-origin-when-cross-origin"
-
-    # Désactive certaines API navigateur dangereuses
     Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=()"
-
-    # Content Security Policy
-    # - Les handlers onclick inline nécessitent 'unsafe-inline' pour les scripts
-    # - Firebase et SheetJS sont autorisés explicitement
-    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://cdn.sheetjs.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.firebasedatabase.app https://*.googleapis.com https://identitytoolkit.googleapis.com wss://*.firebasedatabase.app; img-src 'self' data:; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"

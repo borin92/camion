@@ -1,0 +1,8 @@
+{
+  "name": "gestion-camions",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node -e \"const fs=require('fs');fs.mkdirSync('dist',{recursive:true});fs.copyFileSync('index.html','dist/index.html');fs.copyFileSync('style.css','dist/style.css');\" && npx javascript-obfuscator app.js --output dist/app.js --compact true --string-array true --string-array-threshold 0.75 --identifier-names-generator hexadecimal --rename-globals false --self-defending true"
+  }
+}
