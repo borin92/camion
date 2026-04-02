@@ -18,10 +18,19 @@ const db = firebase.database();
 
 const FORMAT_LABELS = { 'poids-lourd': 'Poids lourd', 'semi': 'Semi-remorque' };
 const FORMAT_KEYS   = ['poids-lourd', 'semi'];
-const STATUS_LABELS = { arrived: 'Arrivé', waiting: 'En attente', left: 'Reparti' };
+const STATUS_LABELS = { arrived: 'Sur place', waiting: 'À venir', left: 'Reparti' };
 const STATUS_BADGE  = { arrived: 'badge-arrived', waiting: 'badge-waiting', left: 'badge-left' };
 let totalPlaces = 82, trucks = [], places = [], truckId = 0, selectedType = 'known', logEntries = [];
 let sortCol = '', sortDir = 1;
+const OVERDUE_MS = 30 * 60 * 1000; // 30 minutes
+const isOverdue = t => t.status === 'arrived' && t.updatedAt && (Date.now() - new Date(t.updatedAt).getTime()) > OVERDUE_MS;
+const overdueElapsed = t => {
+  const ms    = Date.now() - new Date(t.updatedAt).getTime();
+  const total = Math.floor(ms / 60000);
+  const h     = Math.floor(total / 60);
+  const m     = total % 60;
+  return h > 0 ? `${h}h${String(m).padStart(2,'0')}` : `${total} min`;
+};
 
 /* ── Sync depuis Firebase ──────────────────────────────────────── */
 function syncFromSnapshot(data) {
@@ -44,7 +53,8 @@ function syncFromSnapshot(data) {
   document.getElementById('capacity-input').value = totalPlaces;
   document.getElementById('reg-place-label').textContent = 'Numéro de place * (1–' + totalPlaces + ')';
   document.getElementById('reg-place').max = totalPlaces;
-  renderTable(); renderMap(); updateStats(); renderTimeline();
+  renderTable(); renderMap(); updateStats();
+  renderTimeline('bs-timeline-section', 'bs-timeline-chart', 'bs-tl-total');
   if (document.getElementById('view-bigscreen')?.classList.contains('active')) renderBigScreen();
 }
 
@@ -76,11 +86,14 @@ function init() {
     const obj = snapshot.val() || {};
     logEntries = Object.values(obj).sort((a, b) => new Date(b.ts) - new Date(a.ts));
     if (document.getElementById('view-log')?.classList.contains('active')) renderLog();
+    renderTimeline();
   });
   setInterval(() => {
     if (document.getElementById('view-list')?.classList.contains('active')) renderTable();
+    if (document.getElementById('view-map')?.classList.contains('active')) renderMap();
+    if (document.getElementById('view-log')?.classList.contains('active')) renderLog();
     if (document.getElementById('view-bigscreen')?.classList.contains('active')) renderBigScreen();
-  }, 60000);
+  }, 30000);
 }
 
 /* ── Vues & stats ──────────────────────────────────────────────── */
@@ -109,38 +122,50 @@ function sortBy(col) {
 
 function updateStats() {
   const arrived = trucks.filter(t => t.status === 'arrived').length;
+  const waiting = trucks.filter(t => t.status === 'waiting').length;
   const left    = trucks.filter(t => t.status === 'left').length;
   const free    = places.filter(p => p === null).length;
   const pct     = Math.round((arrived / totalPlaces) * 100);
+  // hidden ids (toujours utilisés ailleurs)
   document.getElementById('stat-total').textContent   = totalPlaces;
   document.getElementById('stat-arrived').textContent = arrived;
   document.getElementById('stat-free').textContent    = free;
   document.getElementById('stat-left').textContent    = left;
   const bar = document.getElementById('capacity-bar');
-  bar.style.width  = Math.min(pct, 100) + '%';
-  bar.className    = 'capacity-fill' + (pct >= 90 ? ' danger' : pct >= 70 ? ' warn' : '');
-  const kT = trucks.filter(t => t.type === 'known').length;
-  const kA = trucks.filter(t => t.type === 'known' && t.status === 'arrived').length;
-  const kW = trucks.filter(t => t.type === 'known' && t.status === 'waiting').length;
-  const kL = trucks.filter(t => t.type === 'known' && t.status === 'left').length;
-  document.getElementById('g-known-total').textContent     = kT;
-  document.getElementById('g-known-remaining').textContent = kW;
-  document.getElementById('g-known-arrived').textContent   = kA + ' arrivés';
-  document.getElementById('g-known-waiting').textContent   = kW + ' en attente';
-  document.getElementById('g-known-left').textContent      = kL + ' repartis';
-  const uT = trucks.filter(t => t.type === 'unknown').length;
+  if (bar) { bar.style.width = Math.min(pct,100)+'%'; bar.className = 'capacity-fill'+(pct>=90?' danger':pct>=70?' warn':''); }
+  const kA = trucks.filter(t => t.type === 'known'   && t.status === 'arrived').length;
+  const kW = trucks.filter(t => t.type === 'known'   && t.status === 'waiting').length;
+  const kL = trucks.filter(t => t.type === 'known'   && t.status === 'left').length;
   const uA = trucks.filter(t => t.type === 'unknown' && t.status === 'arrived').length;
   const uW = trucks.filter(t => t.type === 'unknown' && t.status === 'waiting').length;
   const uL = trucks.filter(t => t.type === 'unknown' && t.status === 'left').length;
-  document.getElementById('g-unknown-total').textContent     = uT;
-  document.getElementById('g-unknown-remaining').textContent = uW;
-  document.getElementById('g-unknown-arrived').textContent   = uA + ' arrivés';
-  document.getElementById('g-unknown-waiting').textContent   = uW + ' en attente';
-  document.getElementById('g-unknown-left').textContent      = uL + ' repartis';
-  document.getElementById('map-free').textContent    = free;
-  document.getElementById('map-known').textContent   = kA;
-  document.getElementById('map-unknown').textContent = uA;
-  document.getElementById('map-left').textContent    = left;
+  // 3 grands compteurs
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set('sc-waiting',        waiting);
+  set('sc-waiting-known',  kW + ' connus');
+  set('sc-waiting-unknown',uW + ' sans info');
+  set('sc-arrived',        arrived);
+  set('sc-arrived-known',  kA + ' connus');
+  set('sc-arrived-unknown',uA + ' sans info');
+  set('sc-left',           left);
+  set('sc-left-known',     kL + ' connus');
+  set('sc-left-unknown',   uL + ' sans info');
+  // plan
+  set('map-free',    free);
+  set('map-known',   kA);
+  set('map-unknown', uA);
+  set('map-left',    left);
+  // hidden pour compat
+  set('g-known-total',     trucks.filter(t=>t.type==='known').length);
+  set('g-known-remaining', kW);
+  set('g-known-arrived',   kA+' sur place');
+  set('g-known-waiting',   kW+' à venir');
+  set('g-known-left',      kL+' repartis');
+  set('g-unknown-total',   trucks.filter(t=>t.type==='unknown').length);
+  set('g-unknown-remaining',uW);
+  set('g-unknown-arrived', uA+' sur place');
+  set('g-unknown-waiting', uW+' à venir');
+  set('g-unknown-left',    uL+' repartis');
 }
 
 function renderTable() {
@@ -186,19 +211,51 @@ function renderTable() {
     document.getElementById('table-count').textContent = '';
     return;
   }
+  // Priorités en haut, puis tri colonne
+  filtered.sort((a, b) => (!!a.priority === !!b.priority) ? 0 : a.priority ? -1 : 1);
   tb.innerHTML = filtered.slice(0, 100).map(t => {
-    const late = isLate(t);
-    return `<tr class="${late ? 'row-late' : ''}">
-    <td style="font-weight:600;font-family:monospace;cursor:pointer;color:#185FA5" onclick="openInfo(${t.id})">${t.plate}</td>
+    const late    = isLate(t);
+    const overdue = isOverdue(t);
+    return `<tr class="${overdue ? 'row-overdue' : late ? 'row-late' : ''}${t.priority ? ' row-priority' : ''}">
+    <td style="font-weight:600;font-family:monospace;cursor:pointer;color:#185FA5;white-space:nowrap" onclick="openInfo(${t.id})">
+      <button class="star-btn${t.priority ? ' starred' : ''}" onclick="event.stopPropagation();togglePriority(${t.id})" title="${t.priority ? 'Retirer la priorité' : 'Marquer prioritaire'}">★</button>
+      ${t.plate}
+    </td>
     <td>${FORMAT_LABELS[t.format]}</td>
     <td><span class="badge badge-${t.type === 'known' ? 'known' : 'unknown'}">${t.type === 'known' ? 'Connu' : 'Sans info'}</span></td>
     <td>${t.company || '<span style="color:#9a9a95">—</span>'}</td>
     <td>${t.content || '<span style="color:#9a9a95">—</span>'}</td>
-    <td style="white-space:nowrap;font-size:12px">${t.eta ? (() => { const d = new Date(t.eta); return isNaN(d.getTime()) ? t.eta : d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'}) + ' ' + d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}); })() : '<span style="color:#9a9a95">—</span>'}</td>
+    ${(() => {
+      if (!t.eta) return '<td style="color:#9a9a95;font-size:12px">—</td><td style="color:#9a9a95;font-size:12px">—</td>';
+      // Essai ISO ou format natif
+      let d = new Date(t.eta);
+      if (!isNaN(d.getTime())) {
+        return `<td style="white-space:nowrap;font-size:12px">${d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'})}</td><td style="white-space:nowrap;font-size:12px">${d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</td>`;
+      }
+      // DD/MM/YYYY HH:MM ou DD/MM/YYYY HH:MM:SS
+      const mFull = t.eta.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})\s+(\d{1,2}):(\d{2})/);
+      if (mFull) {
+        d = new Date(parseInt(mFull[3]), parseInt(mFull[2])-1, parseInt(mFull[1]), parseInt(mFull[4]), parseInt(mFull[5]));
+        return `<td style="white-space:nowrap;font-size:12px">${d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'})}</td><td style="white-space:nowrap;font-size:12px">${d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</td>`;
+      }
+      // DD/MM HH:MM
+      const mShort = t.eta.match(/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})/);
+      if (mShort) {
+        return `<td style="white-space:nowrap;font-size:12px">${mShort[1]}/${mShort[2]}</td><td style="white-space:nowrap;font-size:12px">${mShort[3]}:${mShort[4]}</td>`;
+      }
+      // HH:MM ou HH:MM:SS
+      const mTime = t.eta.match(/^(\d{1,2}):(\d{2})/);
+      if (mTime) {
+        return `<td style="color:#9a9a95;font-size:12px">—</td><td style="white-space:nowrap;font-size:12px">${mTime[1].padStart(2,'0')}:${mTime[2]}</td>`;
+      }
+      // fallback
+      return `<td style="color:#9a9a95;font-size:12px">—</td><td style="white-space:nowrap;font-size:12px">${t.eta}</td>`;
+    })()}
     <td>${t.place !== null ? '<strong>#' + (t.place + 1) + '</strong>' : '<span style="color:#9a9a95">—</span>'}</td>
     <td style="text-align:center">
       <span class="badge ${STATUS_BADGE[t.status]}">${STATUS_LABELS[t.status]}</span>
-      ${late ? '<div class="late-badge">⚠ En retard</div>' : ''}
+      ${overdue ? `<div class="overdue-badge">⏱ Sur site depuis ${overdueElapsed(t)}</div>` : ''}
+      ${!overdue && late ? '<div class="late-badge">⚠ En retard</div>' : ''}
       ${t.updatedAt ? `<div class="row-time">${new Date(t.updatedAt).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</div>` : ''}
     </td>
     <td style="white-space:nowrap">
@@ -310,6 +367,11 @@ function openInfo(id) {
   if (t.status === 'waiting') { const b = document.createElement('button'); b.className = 'btn btn-primary'; b.textContent = 'Marquer arrivé';  b.onclick = () => { markArrived(t.id); closeInfo(); }; actions.appendChild(b); }
   if (t.status === 'arrived') { const b = document.createElement('button'); b.className = 'btn';             b.textContent = 'Marquer reparti'; b.onclick = () => { markLeft(t.id);    closeInfo(); }; actions.appendChild(b); }
   if (t.status === 'left')    { const b = document.createElement('button'); b.className = 'btn';             b.textContent = 'Réactiver';       b.onclick = () => { markWaiting(t.id); closeInfo(); }; actions.appendChild(b); }
+  const pr = document.createElement('button');
+  pr.className = 'btn' + (t.priority ? ' btn-priority-on' : '');
+  pr.textContent = t.priority ? '★ Prioritaire' : '☆ Priorité';
+  pr.onclick = () => { togglePriority(t.id); closeInfo(); };
+  actions.appendChild(pr);
   const ed = document.createElement('button'); ed.className = 'btn'; ed.textContent = 'Modifier'; ed.onclick = () => { closeInfo(); openEdit(t.id); }; actions.appendChild(ed);
   const cl = document.createElement('button'); cl.className = 'btn'; cl.textContent = 'Fermer'; cl.onclick = closeInfo; actions.appendChild(cl);
   document.getElementById('info-overlay').classList.add('open');
@@ -331,8 +393,19 @@ function openEdit(id) {
   document.getElementById('edit-btn-known').className   = 'type-btn' + (t.type === 'known'   ? ' active-known'   : '');
   document.getElementById('edit-btn-unknown').className = 'type-btn' + (t.type === 'unknown' ? ' active-unknown' : '');
   document.getElementById('edit-modal-bg').dataset.editType = t.type;
+  document.getElementById('edit-modal-bg').dataset.editPriority = t.priority ? '1' : '0';
+  const pb = document.getElementById('edit-priority-btn');
+  if (pb) { pb.textContent = t.priority ? '★ Prioritaire' : '☆ Non prioritaire'; pb.className = 'btn' + (t.priority ? ' btn-priority-on' : ''); }
   document.getElementById('edit-save-msg').style.display = 'none';
   document.getElementById('edit-modal-bg').classList.add('open');
+}
+function toggleEditPriority() {
+  const bg  = document.getElementById('edit-modal-bg');
+  const cur = bg.dataset.editPriority === '1';
+  bg.dataset.editPriority = cur ? '0' : '1';
+  const pb  = document.getElementById('edit-priority-btn');
+  pb.textContent = cur ? '☆ Non prioritaire' : '★ Prioritaire';
+  pb.className   = 'btn' + (cur ? '' : ' btn-priority-on');
 }
 function selectEditType(t) {
   document.getElementById('edit-modal-bg').dataset.editType = t;
@@ -346,15 +419,17 @@ function saveEdit() {
   const content = document.getElementById('edit-content').value.trim();
   const eta     = document.getElementById('edit-eta').value;
   const notes   = document.getElementById('edit-notes').value.trim();
-  const type    = document.getElementById('edit-modal-bg').dataset.editType || 'known';
+  const type     = document.getElementById('edit-modal-bg').dataset.editType || 'known';
+  const priority = document.getElementById('edit-modal-bg').dataset.editPriority === '1' ? true : null;
   if (!format) { alert('Le format est obligatoire.'); return; }
   const updates = {
-    [`trucks/${id}/format`]:  format,
-    [`trucks/${id}/type`]:    type,
-    [`trucks/${id}/company`]: company,
-    [`trucks/${id}/content`]: content,
-    [`trucks/${id}/eta`]:     eta,
-    [`trucks/${id}/notes`]:   notes,
+    [`trucks/${id}/format`]:   format,
+    [`trucks/${id}/type`]:     type,
+    [`trucks/${id}/company`]:  company,
+    [`trucks/${id}/content`]:  content,
+    [`trucks/${id}/eta`]:      eta,
+    [`trucks/${id}/notes`]:    notes,
+    [`trucks/${id}/priority`]: priority,
   };
   db.ref('/').update(updates).then(() => {
     const msg = document.getElementById('edit-save-msg');
@@ -435,19 +510,20 @@ function clearForm() {
 /* ── Plan des places ───────────────────────────────────────────── */
 function renderMap() {
   const grid     = document.getElementById('map-grid');
-  const zoneSize = Math.ceil(totalPlaces / 3);
-  const labels   = ['Zone A', 'Zone B', 'Zone C'];
+  const ZONES    = [{ label: 'Utilitaires', size: 74 }, { label: 'Poids lourds', size: 8 }];
   const sections = [];
-  for (let z = 0; z < 3; z++) {
-    const s = z * zoneSize, e = Math.min(s + zoneSize, totalPlaces);
-    if (s < totalPlaces) sections.push({ label: labels[z] + ' — Places ' + (s + 1) + ' à ' + e, start: s, end: e });
+  let cursor = 0;
+  for (const z of ZONES) {
+    const s = cursor, e = Math.min(s + z.size, totalPlaces);
+    if (s < totalPlaces) sections.push({ label: `${z.label} — Places ${s + 1} à ${e}`, start: s, end: e });
+    cursor = e;
   }
   const cols = Math.max(8, Math.floor((Math.min(window.innerWidth - 60, 900) - 40) / 36));
   grid.innerHTML = sections.map(sec => {
     let cells = '';
     for (let i = sec.start; i < sec.end; i++) {
       const occ = places[i]; let cls = 'place-free';
-      if (occ !== null) { const t = trucks.find(x => x.id === occ); if (t) cls = t.status === 'left' ? 'place-left' : t.type === 'known' ? 'place-known' : 'place-unknown'; }
+      if (occ !== null) { const t = trucks.find(x => x.id === occ); if (t) cls = isOverdue(t) ? 'place-overdue' : t.status === 'left' ? 'place-left' : t.type === 'known' ? 'place-known' : 'place-unknown'; }
       cells += `<div class="place ${cls}" onclick="showPlace(${i})">${i + 1}</div>`;
     }
     return `<div style="margin-bottom:20px"><div class="map-section-label">${sec.label}</div><div style="display:grid;grid-template-columns:repeat(${cols},32px);gap:4px">${cells}</div></div>`;
@@ -616,6 +692,18 @@ function doImport() {
   }).catch(err => alert('Erreur Firebase : ' + err.message));
 }
 
+function confirmResetAll() {
+  document.getElementById('reset-modal-bg').classList.add('open');
+}
+function doResetAll() {
+  db.ref('/').update({ trucks: null, log: null, 'config/nextId': 0 }).then(() => {
+    document.getElementById('reset-modal-bg').classList.remove('open');
+    const msg = document.getElementById('import-success');
+    msg.textContent = '✓ Base réinitialisée — tous les camions et l\'historique ont été supprimés.';
+    msg.style.display = 'block';
+    setTimeout(() => msg.style.display = 'none', 4000);
+  });
+}
 function cancelImport() {
   importedRows = [];
   document.getElementById('import-preview').style.display = 'none';
@@ -636,6 +724,61 @@ function downloadTemplate() {
   XLSX.writeFile(wb, 'modele_camions.xlsx');
 }
 
+/* ── Priorité ─────────────────────────────────────────────────── */
+function togglePriority(id) {
+  const t = trucks.find(x => x.id === id); if (!t) return;
+  db.ref('/').update({ [`trucks/${id}/priority`]: t.priority ? null : true });
+}
+
+/* ── Timeline arrivées ─────────────────────────────────────────── */
+function renderTimeline(sectionId = 'timeline-section', chartId = 'timeline-chart', totalId = 'tl-total') {
+  const section = document.getElementById(sectionId);
+  const chart   = document.getElementById(chartId);
+  if (!section || !chart) return;
+  // Parser flexible : ISO, DD/MM HH:MM, DD/MM/YYYY HH:MM, HH:MM
+  const parseEtaHour = eta => {
+    if (!eta) return null;
+    let d = new Date(eta);
+    if (!isNaN(d.getTime())) return d.getHours();
+    // DD/MM(/YYYY) HH:MM
+    const m = eta.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\s+(\d{1,2}):(\d{2})/);
+    if (m) { d = new Date(m[3] ? parseInt(m[3]) : new Date().getFullYear(), parseInt(m[2])-1, parseInt(m[1]), parseInt(m[4]), parseInt(m[5])); if (!isNaN(d.getTime())) return d.getHours(); }
+    // HH:MM seul (ancien format)
+    const t2 = eta.match(/^(\d{1,2}):(\d{2})$/);
+    if (t2) return parseInt(t2[1]);
+    return null;
+  };
+  // ETA de tous les camions → vue planning "à venir par heure"
+  const allHours = trucks
+    .filter(t => t.eta)
+    .map(t => parseEtaHour(t.eta))
+    .filter(h => h !== null);
+  if (!allHours.length) { section.style.display = 'none'; return; }
+  const counts = {};
+  allHours.forEach(h => { counts[h] = (counts[h] || 0) + 1; });
+  const hours    = Object.keys(counts).map(Number);
+  const minH     = Math.max(0,  Math.min(...hours) - 1);
+  const maxH     = Math.min(23, Math.max(...hours) + 1);
+  const maxCount = Math.max(...Object.values(counts));
+  const BAR_MAX  = 72; // px
+  let html = '';
+  for (let h = minH; h <= maxH; h++) {
+    const c   = counts[h] || 0;
+    const px  = c > 0 ? Math.max(Math.round((c / maxCount) * BAR_MAX), 6) : 0;
+    const peak = c > 0 && c === maxCount;
+    html += `<div class="tl-col">
+      <div class="tl-bar-wrap">
+        ${c > 0 ? `<span class="tl-count">${c}</span>` : '<span class="tl-count" style="visibility:hidden">0</span>'}
+        <div class="tl-bar${peak ? ' tl-bar-peak' : ''}" style="height:${px}px"></div>
+      </div>
+      <div class="tl-label">${String(h).padStart(2,'0')}h</div>
+    </div>`;
+  }
+  chart.innerHTML = html;
+  document.getElementById(totalId).textContent = `${allHours.length} arrivée${allHours.length > 1 ? 's' : ''} enregistrée${allHours.length > 1 ? 's' : ''}`;
+  section.style.display = 'block';
+}
+
 /* ── Log ───────────────────────────────────────────────────────── */
 function logAction(plate, action, placeIdx) {
   db.ref('log').push({ ts: new Date().toISOString(), plate, action, place: (placeIdx !== undefined && placeIdx !== null) ? placeIdx : null });
@@ -649,11 +792,13 @@ function renderLog() {
   }
   const LABELS = { arrived: 'Arrivée', left: 'Départ', waiting: 'Remis en attente', registered: 'Enregistré' };
   const BADGES = { arrived: 'badge-arrived', left: 'badge-left', waiting: 'badge-waiting', registered: 'badge-known' };
+  const overduePlates = new Set(trucks.filter(t => isOverdue(t)).map(t => t.plate));
   tb.innerHTML = logEntries.map(e => {
-    const d = new Date(e.ts);
-    return `<tr>
+    const d      = new Date(e.ts);
+    const od     = e.action === 'arrived' && overduePlates.has(e.plate);
+    return `<tr class="${od ? 'row-overdue' : ''}">
       <td style="white-space:nowrap;color:var(--text-secondary);font-variant-numeric:tabular-nums">${d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'})} ${d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</td>
-      <td style="font-weight:600;font-family:monospace">${e.plate}</td>
+      <td style="font-weight:600;font-family:monospace">${e.plate}${od ? ' <span class="overdue-badge">⏱ dépassement</span>' : ''}</td>
       <td><span class="badge ${BADGES[e.action] || ''}">${LABELS[e.action] || e.action}</span></td>
       <td>${e.place !== null && e.place !== undefined ? '<strong>#' + (e.place + 1) + '</strong>' : '—'}</td>
     </tr>`;
@@ -715,6 +860,7 @@ function renderBigScreen() {
   if (bar) { bar.style.width = Math.min(pct, 100) + '%'; bar.className = 'bs-progress-fill' + (pct >= 90 ? ' danger' : pct >= 70 ? ' warn' : ''); }
   const lbl = document.getElementById('bs-progress-label');
   if (lbl) lbl.textContent = `${arrived} place${arrived > 1 ? 's' : ''} occupée${arrived > 1 ? 's' : ''} sur ${totalPlaces} — ${pct}%`;
+  renderTimeline('bs-timeline-section', 'bs-timeline-chart', 'bs-tl-total');
   const sec = document.getElementById('bs-late-section');
   if (sec) {
     sec.style.display = lateList.length ? 'block' : 'none';
