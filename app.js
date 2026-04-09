@@ -16,6 +16,9 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
+/* ── Config backend IA ──────────────────────────────────────────── */
+const AI_BACKEND_URL = 'http://localhost:3001';
+
 const FORMAT_LABELS = { 'poids-lourd': 'Poids lourd', 'semi': 'Semi-remorque' };
 const FORMAT_KEYS   = ['poids-lourd', 'semi'];
 const STATUS_LABELS = { arrived: 'Sur place', waiting: 'À venir', left: 'Reparti' };
@@ -593,6 +596,94 @@ function selectMapTruck(id) {
 }
 function closeMapModal() { document.getElementById('map-modal-bg').classList.remove('open'); }
 window.addEventListener('resize', () => { if (document.getElementById('view-map').classList.contains('active')) renderMap(); });
+
+/* ── Import IA ─────────────────────────────────────────────────── */
+let aiImportedRows = [];
+
+function handleAiFile(file) {
+  if (!file) return;
+  const drop = document.getElementById('ai-import-drop');
+  const statusEl = document.getElementById('ai-import-status');
+  drop.classList.remove('loaded');
+  document.getElementById('ai-import-preview').style.display = 'none';
+  statusEl.style.display = 'block';
+  statusEl.innerHTML = '<span style="color:var(--text-secondary)">⏳ Analyse en cours…</span>';
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  fetch(`${AI_BACKEND_URL}/api/parse`, { method: 'POST', body: formData })
+    .then(r => {
+      if (!r.ok) return r.json().then(e => { throw new Error(e.error || 'Erreur serveur'); });
+      return r.json();
+    })
+    .then(data => {
+      if (!data.trucks || !data.trucks.length) throw new Error('Aucun camion détecté dans le fichier');
+      aiImportedRows = data.trucks;
+      drop.classList.add('loaded');
+      statusEl.style.display = 'none';
+      renderAiPreview();
+    })
+    .catch(err => {
+      statusEl.innerHTML = `<span style="color:var(--red,#e74c3c)">❌ ${err.message}</span>`;
+      drop.classList.remove('loaded');
+    });
+}
+
+function renderAiPreview() {
+  const dupes = aiImportedRows.filter(r =>  trucks.some(t => t.plate === r.plate));
+  const valid = aiImportedRows.filter(r => !trucks.some(t => t.plate === r.plate));
+  document.getElementById('ai-import-summary').innerHTML =
+    `<strong>${aiImportedRows.length}</strong> camion(s) détecté(s) &nbsp;—&nbsp; ` +
+    `<span class="v-green"><strong>${valid.length}</strong> nouveau(x)</span>` +
+    (dupes.length ? ` &nbsp;—&nbsp; <span style="color:var(--amber)"><strong>${dupes.length}</strong> doublon(s)</span>` : '');
+  document.getElementById('ai-import-btn').textContent = `Importer ${valid.length} camion(s)`;
+  document.getElementById('ai-import-table-body').innerHTML = aiImportedRows.slice(0, 20).map(r => {
+    const isDupe = trucks.some(t => t.plate === r.plate);
+    return `<tr style="${isDupe ? 'opacity:0.4' : ''}">
+      <td style="font-weight:600;font-family:monospace">${r.plate}${isDupe ? ' <span style="font-size:10px;color:var(--amber)">(doublon)</span>' : ''}</td>
+      <td>${FORMAT_LABELS[r.format] || r.format}</td>
+      <td><span class="badge badge-${r.type === 'known' ? 'known' : 'unknown'}">${r.type === 'known' ? 'Connu' : 'Sans info'}</span></td>
+      <td>${r.company || '<span style="color:#9a9a95">—</span>'}</td>
+      <td>${r.content || '<span style="color:#9a9a95">—</span>'}</td>
+      <td>${r.eta     || '<span style="color:#9a9a95">—</span>'}</td>
+      <td>${r.notes   || '<span style="color:#9a9a95">—</span>'}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('ai-import-table-more').textContent =
+    aiImportedRows.length > 20 ? `… et ${aiImportedRows.length - 20} autre(s) ligne(s) non affichée(s)` : '';
+  document.getElementById('ai-import-preview').style.display = 'block';
+}
+
+function doAiImport() {
+  const clearAll = document.getElementById('ai-import-clear').checked;
+  const toImport = clearAll ? aiImportedRows : aiImportedRows.filter(r => !trucks.some(t => t.plate === r.plate));
+  if (!toImport.length) { alert('Aucun camion à importer (tous en doublon ?).'); return; }
+  const updates = {};
+  let nextId = clearAll ? 0 : truckId;
+  if (clearAll) updates['trucks'] = null;
+  toImport.forEach(r => { updates[`trucks/${nextId}`] = { ...r, id: nextId }; nextId++; });
+  updates['config/nextId'] = nextId;
+  if (clearAll) updates['config/totalPlaces'] = totalPlaces;
+  db.ref('/').update(updates).then(() => {
+    const msg = document.getElementById('ai-import-success');
+    msg.textContent = `✓ ${toImport.length} camion(s) importé(s) avec succès !`;
+    msg.style.display = 'block';
+    aiImportedRows = [];
+    document.getElementById('ai-import-preview').style.display = 'none';
+    document.getElementById('ai-import-file').value = '';
+    document.getElementById('ai-import-drop').classList.remove('loaded');
+    setTimeout(() => msg.style.display = 'none', 4000);
+  }).catch(err => alert('Erreur Firebase : ' + err.message));
+}
+
+function cancelAiImport() {
+  aiImportedRows = [];
+  document.getElementById('ai-import-preview').style.display = 'none';
+  document.getElementById('ai-import-file').value = '';
+  document.getElementById('ai-import-drop').classList.remove('loaded');
+  document.getElementById('ai-import-status').style.display = 'none';
+}
 
 /* ── Import Excel ──────────────────────────────────────────────── */
 let importedRows = [];

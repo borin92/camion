@@ -239,6 +239,45 @@
         <div id="import-success" class="success-msg"></div>
       </div>
     </div>
+
+    <!-- Section IA -->
+    <div class="form-section" style="margin-top:1.5rem;border-top:2px solid var(--border);padding-top:1.5rem">
+      <h3 style="display:flex;align-items:center;gap:8px">✨ Analyser avec l'IA <span style="font-size:12px;font-weight:400;color:var(--text-secondary);background:var(--bg-tertiary);padding:2px 8px;border-radius:10px">Gemini Flash</span></h3>
+      <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">Importe n'importe quel fichier (PDF, Word, Excel mal formaté, CSV…) — l'IA identifie automatiquement les camions.</p>
+      <div class="import-drop" id="ai-import-drop"
+        onclick="document.getElementById('ai-import-file').click()"
+        ondragover="event.preventDefault();this.classList.add('drag-over')"
+        ondragleave="this.classList.remove('drag-over')"
+        ondrop="event.preventDefault();this.classList.remove('drag-over');handleAiFile(event.dataTransfer.files[0])">
+        <input type="file" id="ai-import-file" accept="*" style="display:none" onchange="handleAiFile(this.files[0])">
+        <div style="font-size:36px;margin-bottom:8px">🤖</div>
+        <div style="font-weight:500;font-size:14px;margin-bottom:4px">Glisser n'importe quel fichier ici</div>
+        <div style="font-size:12px">.pdf · .docx · .xlsx · .csv · .txt · et plus</div>
+      </div>
+      <div id="ai-import-status" style="display:none;padding:10px 0;font-size:13px"></div>
+    </div>
+    <div id="ai-import-preview" style="display:none">
+      <div class="form-section">
+        <h3>Aperçu — Résultat IA</h3>
+        <div id="ai-import-summary" style="margin-bottom:12px;font-size:13px"></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:8px 10px;background:var(--bg-tertiary);border-radius:var(--radius-sm)">
+          <input type="checkbox" id="ai-import-clear" style="cursor:pointer;width:15px;height:15px">
+          <label for="ai-import-clear" style="font-size:13px;cursor:pointer;color:var(--text-secondary)">Vider toutes les données existantes avant d'importer</label>
+        </div>
+        <div style="overflow-x:auto;margin-bottom:1rem">
+          <table>
+            <thead><tr><th>Immat.</th><th>Format</th><th>Type</th><th>Société</th><th>Contenu</th><th>Heure</th><th>Notes</th></tr></thead>
+            <tbody id="ai-import-table-body"></tbody>
+          </table>
+          <div id="ai-import-table-more" style="font-size:12px;color:var(--text-secondary);margin-top:6px"></div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" id="ai-import-btn" onclick="doAiImport()">Importer</button>
+          <button class="btn" onclick="cancelAiImport()">Annuler</button>
+        </div>
+        <div id="ai-import-success" class="success-msg"></div>
+      </div>
+    </div>
   </div>
 
   <!-- HISTORIQUE -->
