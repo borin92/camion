@@ -17,7 +17,7 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
 /* ── Config backend IA ──────────────────────────────────────────── */
-const AI_BACKEND_URL = 'http://localhost:3001';
+const AI_BACKEND_URL = '';
 
 const FORMAT_LABELS = { 'poids-lourd': 'Poids lourd', 'semi': 'Semi-remorque' };
 const FORMAT_KEYS   = ['poids-lourd', 'semi'];
